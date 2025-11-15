@@ -8,6 +8,66 @@ let titleAnim = {
     duration: 1400
 };
 
+// 新增：WebAudio 合成爆破音效（不需外部檔案）
+let audioCtx = null;
+let suppressPop = false; // 新增：在選單/overlay 操作時抑制爆破音效
+// 新增：第一單元作品 URL 與控制旗標（僅此連結開啟時，在爆炸結束時播放音效）
+const FIRST_UNIT_URL = 'https://wus28026-debug.github.io/20251020/';
+let playPopOnExplode = false;
+function playPopSound() {
+    try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const duration = 0.16;
+        const now = audioCtx.currentTime;
+
+        // 白噪聲快衰減（爆破感），調整衰減與頻率以提高清楚度
+        const bufferSize = Math.floor(audioCtx.sampleRate * duration);
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            // 增強初始振幅並快速衰減
+            data[i] = (Math.random() * 2 - 1) * Math.exp(-10 * i / bufferSize);
+        }
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+
+        const noiseFilter = audioCtx.createBiquadFilter();
+        noiseFilter.type = 'highpass';
+        noiseFilter.frequency.setValueAtTime(900, now);
+
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.setValueAtTime(1.2, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+        // 短促 click（增加“砰”感）
+        const osc = audioCtx.createOscillator();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(800, now);
+        const oscGain = audioCtx.createGain();
+        oscGain.gain.setValueAtTime(0.8, now);
+        oscGain.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.5);
+
+        // mix and connect
+        noise.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        osc.connect(oscGain);
+
+        const master = audioCtx.createGain();
+        master.gain.setValueAtTime(0.9, now); // 總音量
+        noiseGain.connect(master);
+        oscGain.connect(master);
+        master.connect(audioCtx.destination);
+
+        noise.start(now);
+        osc.start(now);
+        noise.stop(now + duration);
+        osc.stop(now + duration);
+    } catch (e) {
+        // 若瀏覽器不支援 WebAudio 則靜默失敗
+    }
+}
+
 function setup() {
     // 全螢幕：依視窗大小建立畫布並移到左上角
     document.body.style.margin = '0';
@@ -52,39 +112,52 @@ function easeOutElastic(t) {
 }
 
 class Bomb {
-	constructor() {
-		this.forms = [];
-		this.setValues();
-	}
+    constructor() {
+        this.forms = [];
+        this.popByClick = false; // 新增：是否由滑鼠觸發爆破
+        this.setValues();
+    }
 
-	run() {
-		for (let f of this.forms) {
-			stroke(255);
-			f.run();
-		}
-		if (this.forms[0].isDead()) {
-			this.forms.length = 0;
-			this.setValues();
-		}
-	}
+    run() {
+        for (let f of this.forms) {
+            stroke(255);
+            f.run();
+        }
+        // 當爆炸結束時：僅在由滑鼠觸發且 playPopOnExplode 為 true 時播放音效
+        if (this.forms[0] && this.forms[0].isDead()) {
+            if (this.popByClick && playPopOnExplode) {
+                playPopSound();
+            }
+            this.forms.length = 0;
+            this.popByClick = false; // 重置
+            this.setValues();
+        }
+    }
 
-	setValues() {
-		let x = random(-0.1, 1.1) * width;
-		let y = random(-0.1, 1.1) * height;
-		let s = random(10, 100);
-		let t = -int(random(100));
-		let t1 = int(random(60, 150));
-		let num = int(random(6, 23));
-		let aa = random(10);
-		let rnd = int(random(4));
-		let col = color(random(colors));
-		for (let a = 0; a < TAU; a += (TAU / num)) {
-			if (rnd == 0) this.forms.push(new Form01(x, y, s, a + aa, t, t1, col));
-			if (rnd == 3) this.forms.push(new Form04(x, y, s, a + aa, t, t1, col));
-		}
-		if (rnd == 1) this.forms.push(new Form02(x, y, s, aa, t, t1, col));
-		if (rnd == 2) this.forms.push(new Form03(x, y, s, aa, t, t1, col));
-	}
+    setValues() {
+        let x = random(-0.1, 1.1) * width;
+        let y = random(-0.1, 1.1) * height;
+        let s = random(10, 100);
+        let t = -int(random(100));
+        let t1 = int(random(60, 150));
+        let num = int(random(6, 23));
+        let aa = random(10);
+        let rnd = int(random(4));
+        let col = color(random(colors));
+
+        // 儲存中心與大小，方便點擊判斷
+        this.x = x;
+        this.y = y;
+        this.size = s;
+        this.popByClick = false;
+
+        for (let a = 0; a < TAU; a += (TAU / num)) {
+            if (rnd == 0) this.forms.push(new Form01(x, y, s, a + aa, t, t1, col));
+            if (rnd == 3) this.forms.push(new Form04(x, y, s, a + aa, t, t1, col));
+        }
+        if (rnd == 1) this.forms.push(new Form02(x, y, s, aa, t, t1, col));
+        if (rnd == 2) this.forms.push(new Form03(x, y, s, aa, t, t1, col));
+    }
 }
 
 class Form01 {
@@ -338,7 +411,7 @@ function createSideMenu() {
         { text: '測驗系統', action: 'iframe', url: 'https://wus28026-debug.github.io/20251103/' },
         { text: '測驗卷筆記', action: 'iframe', url: 'https://hackmd.io/@BaN-RevzTta1yPjQLaJ-Ew/rkyK7qr1-e' },
         { text: '作品筆記', action: 'iframe', url: 'https://hackmd.io/p2N4tFB4TzS7uymBekXbEA' },
-        { text: '淡江大學', submenu: [ { text: '教育科技學系', action: 'iframe', url: 'https://hackmd.io/p2N4tFB4TzS7uymBekXbEA' } ] },
+        { text: '淡江大學', submenu: [ { text: '教育科技學系', action: 'iframe', url: 'https://www.et.tku.edu.tw/' } ], href: 'https://www.tku.edu.tw/' },
         { text: '回到首頁', href: 'index.html' }
     ];
 
@@ -440,6 +513,8 @@ function createSideMenu() {
         iframe.src = url;
         const overlay = document.getElementById('iframeOverlay');
         overlay.style.display = 'flex';
+        // 僅當開啟「第一單元作品」時，啟用爆炸結束播放音效
+        playPopOnExplode = (url === FIRST_UNIT_URL);
         // 讓 menu 收回
         const menu = document.getElementById('sideMenu');
         if (menu) menu.classList.remove('open');
@@ -448,6 +523,8 @@ function createSideMenu() {
         // 停止並清除 src（釋放資源）
         iframe.src = 'about:blank';
         overlay.style.display = 'none';
+        // 關閉 iframe 時關閉爆破後音效
+        playPopOnExplode = false;
     }
 
     closeBtn.addEventListener('click', closeIframe);
@@ -548,5 +625,34 @@ function windowResized() {
     const title = document.getElementById('canvasTitle');
     if (title && !titleAnim.running) {
         title.style.top = (window.innerHeight / 2 - title.offsetHeight / 2) + 'px';
+    }
+}
+
+// 新增：只在滑鼠點擊畫布上氣球時觸發爆破並播放音效
+function mousePressed() {
+    // 若目前被抑制（例如選單操作）則不處理為點擊爆破
+    if (typeof suppressPop !== 'undefined' && suppressPop) return;
+
+    // 確保點擊目標是畫布（避免點擊側選單或 overlay 時觸發）
+    const el = document.elementFromPoint(mouseX, mouseY);
+    if (!cnv || !el) return;
+    if (el !== cnv.elt && el.tagName !== 'CANVAS') return;
+
+    // 找到被點擊的 bomb（以中心距離判斷），觸發其 forms 開始並標記 popByClick
+    for (let b of bombs) {
+        if (!b.x || !b.y || !b.size) continue;
+        const d = dist(mouseX, mouseY, b.x, b.y);
+        if (d <= b.size * 1.2) {
+            // 立即讓各 form 進入爆炸階段（避免原本延遲）
+            for (let f of b.forms) {
+                if (f && typeof f.t !== 'undefined') f.t = 1;
+            }
+            b.popByClick = true;
+
+            // 在使用者按下時立即播放音效（確保由 user gesture 啟動 AudioContext）
+            playPopSound();
+
+            break; // 一次只觸發一個氣球
+        }
     }
 }
