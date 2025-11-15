@@ -1,6 +1,12 @@
 let bombs = [];
 let colors = ["#f20c0c", "#ffaa00", "#f2f20c", "#0cf259", "#0ca6f2", "#590cf2", "#f20ca6"];
 let cnv = null; // 新增：canvas 變數以便置中或 resize
+// 新增：標題動畫狀態
+let titleAnim = {
+    running: false,
+    startTime: 0,
+    duration: 1400
+};
 
 function setup() {
     // 全螢幕：依視窗大小建立畫布並移到左上角
@@ -11,6 +17,9 @@ function setup() {
 
     // 新增：建立左側隱藏選單
     createSideMenu();
+
+    // 新增：建立畫布中央文字
+    createCenteredTitle();
 
     rectMode(CENTER);
     strokeWeight(2);
@@ -27,11 +36,19 @@ function draw() {
 }
 
 function easeInCubic(t) {
-	return t * t * t;
+    return t * t * t;
 }
 
 function easeOutCubic(t) {
-	return (--t) * t * t + 1;
+    return (--t) * t * t + 1;
+}
+
+// 新增：彈性緩動（用於文字由上方彈性移到中間）
+function easeOutElastic(t) {
+    const c4 = (2 * Math.PI) / 3;
+    if (t === 0) return 0;
+    if (t === 1) return 1;
+    return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
 }
 
 class Bomb {
@@ -289,6 +306,22 @@ function createSideMenu() {
         cursor: pointer;
         z-index: 2;
     }
+
+    /* 畫布中央標題（使用頁面已有 .rubik-80s-fade-regular 字型類別）
+       初始放在視窗最上方 (top:0) 並使用 transform translate(-50%, 0) 以便從上方往中間移動 */
+    .canvasTitle {
+        position: fixed;
+        left: 50%;
+        top: 0;
+        transform: translate(-50%, 0);
+        color: #ffffff;
+        font-size: clamp(36px, 6vw, 96px);
+        z-index: 9000; /* 低於側邊選單（9999）及 overlay（20000） */
+        pointer-events: none; /* 不阻擋畫面互動 */
+        text-align: center;
+        white-space: nowrap;
+        letter-spacing: 0.02em;
+    }
     `;
     const style = document.createElement('style');
     style.type = 'text/css';
@@ -304,7 +337,7 @@ function createSideMenu() {
         { text: '第一單元講義', action: 'iframe', url: 'https://hackmd.io/-vg_gBO4RuCCxOnJCADrRQ?both' },
         { text: '測驗系統', action: 'iframe', url: 'https://wus28026-debug.github.io/20251103/' },
         { text: '測驗卷筆記', action: 'iframe', url: 'https://hackmd.io/@BaN-RevzTta1yPjQLaJ-Ew/rkyK7qr1-e' },
-        { text: '作品筆記', action: 'iframe', url: 'https://hackmd.io/xJIwS4zFTECwJCVvxXfS1g' },
+        { text: '作品筆記', action: 'iframe', url: 'https://hackmd.io/p2N4tFB4TzS7uymBekXbEA' },
         { text: '淡江大學', submenu: [ { text: '教育科技學系', action: 'iframe', url: 'https://hackmd.io/p2N4tFB4TzS7uymBekXbEA' } ] },
         { text: '回到首頁', href: 'index.html' }
     ];
@@ -462,6 +495,43 @@ function createSideMenu() {
     });
 }
 
+// 新增：建立畫布中央文字元素
+function createCenteredTitle() {
+    // 若已建立則不重複建立
+    if (document.getElementById('canvasTitle')) return;
+    const el = document.createElement('div');
+    el.id = 'canvasTitle';
+    // 加上頁面已有的字型類別（.rubik-80s-fade-regular）
+    el.className = 'canvasTitle rubik-80s-fade-regular';
+    el.textContent = '淡江大學';
+    // 初始放在最上方
+    el.style.top = '0px';
+    el.style.transform = 'translate(-50%, 0)';
+    document.body.appendChild(el);
+
+    // 啟動動畫：由視窗最上方彈性移到中間
+    titleAnim.running = true;
+    titleAnim.startTime = performance.now();
+    const dur = titleAnim.duration;
+    const startTop = 0;
+    const animate = (now) => {
+        const elapsed = now - titleAnim.startTime;
+        let t = Math.min(1, elapsed / dur);
+        const ease = easeOutElastic(t);
+        const endTop = (window.innerHeight / 2) - (el.offsetHeight / 2);
+        const cur = startTop + (endTop - startTop) * ease;
+        el.style.top = cur + 'px';
+        if (t < 1) {
+            requestAnimationFrame(animate);
+        } else {
+            // 確保精確停在中間
+            el.style.top = endTop + 'px';
+            titleAnim.running = false;
+        }
+    };
+    requestAnimationFrame(animate);
+}
+
 function windowResized() {
     // 視窗大小改變時重新調整畫布大小並定位
     if (cnv) {
@@ -472,5 +542,11 @@ function windowResized() {
     const overlay = document.getElementById('iframeOverlay');
     if (overlay && overlay.style.display === 'flex') {
         // 若需可在此加入其他 resize 處理
+    }
+
+    // 若標題動畫已結束，視窗 resize 時保持置中
+    const title = document.getElementById('canvasTitle');
+    if (title && !titleAnim.running) {
+        title.style.top = (window.innerHeight / 2 - title.offsetHeight / 2) + 'px';
     }
 }
